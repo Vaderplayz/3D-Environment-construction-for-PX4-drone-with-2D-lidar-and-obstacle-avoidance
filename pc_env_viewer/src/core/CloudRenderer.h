@@ -24,6 +24,7 @@ public:
   void setAxisRainbowAxis(AxisColorAxis axis);
   void setTrajectoryPoints(const std::vector<Eigen::Vector3f> & points);
   void clearTrajectory();
+  void setTrajectoryVisible(bool visible);
 
   void setPointSize(float point_size);
   void setBackgroundColor(double r, double g, double b);
@@ -48,6 +49,7 @@ private:
   pcl::PointCloud<pcl::PointXYZRGB>::Ptr axis_rainbow_cloud_{new pcl::PointCloud<pcl::PointXYZRGB>()};
   std::vector<Eigen::Vector3f> trajectory_points_;
   std::size_t trajectory_line_count_{0};
+  bool trajectory_visible_{false};
   bool has_preview_{false};
   ColorMode current_mode_{ColorMode::Height};
   AxisColorAxis axis_rainbow_axis_{AxisColorAxis::Z};

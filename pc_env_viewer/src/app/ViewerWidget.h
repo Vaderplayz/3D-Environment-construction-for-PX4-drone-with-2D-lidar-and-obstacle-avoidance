@@ -23,6 +23,7 @@ public:
   void setAxisRainbowAxis(AxisColorAxis axis);
   void setTrajectoryPoints(const std::vector<Eigen::Vector3f> & points);
   void clearTrajectory();
+  void setTrajectoryVisible(bool visible);
   void setPointSize(float point_size);
   void setBackgroundColor(const QColor & color);
   bool saveScreenshot(const QString & path) const;

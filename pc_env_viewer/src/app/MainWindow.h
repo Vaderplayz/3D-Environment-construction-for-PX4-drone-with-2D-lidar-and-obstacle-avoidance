@@ -58,6 +58,7 @@ private slots:
   void onColorModeChanged(int index);
   void onRainbowAxisChanged(int index);
   void onPointSizeChanged(double value);
+  void onShowTrajectory3DToggled(bool enabled);
   void onLoadWatcherFinished();
   void onLoadProgressMessage(const QString & phase);
 
@@ -105,6 +106,7 @@ private:
   QAction * reload_action_{nullptr};
   QAction * open_2d_map_action_{nullptr};
   QAction * open_trajectory_action_{nullptr};
+  QAction * show_trajectory_3d_action_{nullptr};
   QAction * reset_camera_action_{nullptr};
   QAction * auto_fit_action_{nullptr};
   QAction * screenshot_action_{nullptr};

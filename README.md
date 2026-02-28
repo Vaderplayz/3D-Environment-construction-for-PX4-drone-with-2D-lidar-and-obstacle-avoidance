@@ -24,6 +24,7 @@ Top-level contents:
 - `slam_toolbox` (upstream package copy)
 - `pc_env_viewer` (standalone Qt/PCL app)
 - `pc_env_viewer_no_ros` (standalone variant)
+- `mission_obs_avoid`
 - `slam_config` (extra config files)
 - helper scripts in `scripts/` and `run_pc_viewer.sh`
 
@@ -33,16 +34,19 @@ Control and mapping data flow:
 
 1. PX4 SITL publishes vehicle state through MAVROS.
 2. `obs_avoid` planner(s) compute local velocity commands from LiDAR + odometry + goal.
-3. `user_ctrl` or `spiral_mapping_mode` forwards command stream to `/mavros/setpoint_velocity/cmd_vel`.
-4. Horizontal LiDAR (`/scan_horizontal`) feeds `slam_toolbox` to produce `map` and `map->odom` correction.
-5. Vertical LiDAR (`/scan_vertical`) feeds `vertical_lidar_mapper` to build rolling and global 3D clouds.
-6. Export service saves PCD + 2D occupancy map + trajectory.
-7. `pc_env_viewer` opens exported cloud/map artifacts offline.
+3. `mission_obs_avoid` cmd arbiter (when enabled) is the single writer to `/mavros/setpoint_velocity/cmd_vel`.
+4. `user_ctrl` or `spiral_mapping_mode` can publish to `/offboard_stack/cmd_vel` (remapped path).
+5. `mission_obs_avoid` interceptor can override with mission detour commands during hazard events.
+6. Horizontal LiDAR (`/scan_horizontal`) feeds `slam_toolbox` to produce `map` and `map->odom` correction.
+7. Vertical LiDAR (`/scan_vertical`) feeds `vertical_lidar_mapper` to build rolling and global 3D clouds.
+8. Export service saves PCD + 2D occupancy map + trajectory.
+9. `pc_env_viewer` opens exported cloud/map artifacts offline.
 
 Important control-mode constraint:
 
 - Current avoidance/control stack is designed around MAVROS velocity setpoints and OFFBOARD control.
 - In PX4 `AUTO.MISSION`, these velocity setpoints are generally not the active path-following source.
+- `mission_obs_avoid` adds mission-mode interception by switching to OFFBOARD temporarily, then resuming mission with guard logic.
 
 ## 3) Package Inventory
 
@@ -154,6 +158,25 @@ Purpose:
 - `pc_env_viewer`: Qt/PCL/VTK desktop app for `.pcd/.ply` and map overlays.
 - `pc_env_viewer_no_ros`: standalone variant with similar tooling.
 
+### 3.10 `mission_obs_avoid`
+
+Purpose:
+
+- Mission-mode obstacle interception supervisor with command arbitration.
+
+Nodes:
+
+- `mission_interceptor_node`
+- `cmd_vel_arbiter_node`
+
+Core behavior:
+
+- Monitor `AUTO.MISSION` hazard from `/scan_horizontal`.
+- Switch to `OFFBOARD` for detour primitive (brake -> sidestep -> forward-clear).
+- Request `AUTO.MISSION` resume.
+- Apply `RESUME_GUARD` to avoid ping-pong.
+- Enter `AUTO.LOITER` latch on immediate retrigger/failure.
+
 ## 4) Prerequisites
 
 Platform assumptions:
@@ -194,6 +217,16 @@ colcon build --symlink-install
 source install/setup.bash
 ```
 
+Build `mission_obs_avoid` (separate package under this repo):
+
+```bash
+cd ~/ros2_ws
+COLCON_LOG_PATH=/tmp/colcon_log_mission \
+colcon build --base-paths src/obs_avoid/mission_obs_avoid \
+  --packages-select mission_obs_avoid
+source install/setup.bash
+```
+
 Build desktop viewer manually:
 
 ```bash
@@ -211,6 +244,12 @@ cd ~/ros2_ws/src/obs_avoid
 ./scripts/start_sim_stack_terminator.sh
 ```
 
+Enable mission interception + cmd arbitration in this stack:
+
+```bash
+ENABLE_MISSION_OBS_AVOID=1 ./scripts/start_sim_stack_terminator.sh
+```
+
 What this starts:
 
 - PX4 SITL (`gz_x500_lidar_2d_tilted` in `walls` world)
@@ -223,7 +262,7 @@ What this starts:
 - planner pane + user mode pane
 - RViz
 
-### Workflow B: Mapping mode launcher (planner + spiral + SLAM + mapper)
+### Workflow B: Mapping mode launcher (SLAM + mapper only)
 
 ```bash
 cd ~/ros2_ws/src/obs_avoid
@@ -238,29 +277,34 @@ Default behavior:
   - `/scan_vertical`
   - `/mavros/local_position/odom`
 - Waits for TF source node (`/px4_odom_flatten_node` or `/odom_to_tf_bridge`).
-- Starts planner (`local_planner_mode_a` by default).
-- Starts `spiral_mapping_mode`.
 - Starts `slam_toolbox` async mapping.
 - Starts `vertical_lidar_mapper`.
-- Auto-relays `/scan_horizontal -> /scan` for sector/hybrid modes if needed.
 
-### Workflow C: SLAM + mapper only
+### Workflow C: Flight control + avoidance only (DWA/local planner)
 
 ```bash
 cd ~/ros2_ws/src/obs_avoid
-./scripts/start_slam_mapper.sh
+./scripts/start_flight_mode.sh
 ```
 
-This runs two panes:
+Optional planner selection:
 
-- `slam_toolbox` async mapping using `uav_stack_bringup/config/slam_mapping_fast.yaml`
-- `vertical_lidar_mapper` launch using `vertical_lidar_mapper/config/params.yaml`
+```bash
+PLANNER_NODE=local_planner_hybrid_mode ./scripts/start_flight_mode.sh
+```
 
-### Workflow D: Spiral mode only
+### Workflow D: Spiral mode only (flight mission helper, not mapping launcher)
 
 ```bash
 cd ~/ros2_ws/src/obs_avoid
 ./scripts/start_spiral_mapping_mode.sh
+```
+
+### Workflow E: Mission interception package only
+
+```bash
+cd ~/ros2_ws/src/obs_avoid
+./mission_obs_avoid/scripts/start_mission_obs_avoid.sh
 ```
 
 ## 7) Script Reference
@@ -283,47 +327,52 @@ Key env vars:
 - `MAVROS_LAUNCH_FILE` (default `px4.launch`)
 - `MAVROS_RESPAWN` (default `true`)
 - `OBS_AVOID_DELAY_SEC` (default `30`)
+- `ENABLE_MISSION_OBS_AVOID` (default `0`): launch mission interceptor + cmd arbiter and remap offboard cmd path
 
 ### 7.2 `scripts/start_mapping_mode.sh`
 
 Key env vars:
 
+- `MAPPING_PROFILE` (`v11_clean|v11_detail|legacy`, default `v11_clean`)
 - `SLAM_PARAMS_FILE`
 - `MAPPER_PARAMS_FILE`
 - `SCAN_TOPIC` (default `/scan_vertical`)
 - `TARGET_FRAME` (default `map`)
 - `USE_SIM_TIME` (default `true`)
-- `ENABLE_SPIRAL` (default `true`)
-- `ENABLE_DODGE_PLANNER` (default `true`)
-- `PLANNER_NODE` (`local_planner_mode_a|local_planner_sector_mode|local_planner_hybrid_mode`)
-- `AUTO_SCAN_RELAY_FOR_SCAN_TOPIC` (default `true`)
 - `WAIT_TIMEOUT_SEC` (default `60`)
 - log files:
   - `SLAM_LOG=/tmp/slam_mapping_fast.log`
   - `MAPPER_LOG=/tmp/vertical_lidar_mapper.log`
-  - `SPIRAL_LOG=/tmp/spiral_mapping_mode.log`
-  - `PLANNER_LOG=/tmp/obs_avoid_planner.log`
-  - `SCAN_RELAY_LOG=/tmp/obs_avoid_scan_relay.log`
+
+Profile behavior:
+
+- `v11_clean`:
+  - default mapper params: `vertical_lidar_mapper/config/v11_clean.yaml`
+- `v11_detail`:
+  - default mapper params: `vertical_lidar_mapper/config/v11_detail.yaml`
+  - keeps more geometry/detail (less aggressive gates/downsampling)
+- `legacy`:
+  - default mapper params: `vertical_lidar_mapper/config/params.yaml`
+  - keeps previous behavior for A/B comparison
 
 ### 7.3 `scripts/start_slam_mapper.sh`
 
+Compatibility wrapper only.
+- It prints a deprecation message and forwards to `scripts/start_mapping_mode.sh`.
+
+### 7.4 `scripts/start_flight_mode.sh`
+
 Key env vars:
 
-- `SESSION`
-- `USE_TMUX`
-- `RECREATE_SESSION`
-- `KILL_BEFORE_LAUNCH`
-- `SLAM_PARAMS_FILE`
-- `MAPPER_PARAMS_FILE`
-- `SCAN_TOPIC`
-- `TARGET_FRAME`
-- `USE_SIM_TIME`
+- `PLANNER_NODE` (`local_planner_mode_a|local_planner_sector_mode|local_planner_hybrid_mode`)
+- `USE_SIM_TIME` (default `true`)
 
-### 7.4 Utility Scripts
+### 7.5 Utility Scripts
 
 - `scripts/export_global_pcd.sh`: wait for `/vertical_lidar_mapper/save_pcd` and trigger export.
 - `scripts/view_latest_pcd.sh`: optionally export then open newest `.pcd` in available viewer.
 - `scripts/start_trajectory_compare.sh`: run map-vs-odom-vs-ground-truth path publisher.
+- `scripts/run_offline_refine.sh`: replay a bag with selected profile and export refined assets.
 - `run_pc_viewer.sh`: build (if needed) and launch desktop cloud viewer.
 
 ## 8) Topic, TF, and Time Contracts
@@ -383,6 +432,12 @@ Trigger export manually:
 ros2 service call /vertical_lidar_mapper/save_pcd std_srvs/srv/Trigger "{}"
 ```
 
+Force a keyframe rebuild (V1.1):
+
+```bash
+ros2 service call /vertical_lidar_mapper/rebuild_global std_srvs/srv/Trigger "{}"
+```
+
 Default export directory:
 
 - `/home/lehaitrung/vertical_mapper_exports`
@@ -393,6 +448,20 @@ Generated files per timestamp:
 - `vertical_map2d_<sec>_<nsec>.pgm`
 - `vertical_map2d_<sec>_<nsec>.yaml`
 - `vertical_trajectory_<sec>_<nsec>.csv`
+
+Offline refine pipeline:
+
+```bash
+./obs_avoid/scripts/run_offline_refine.sh <bag_path> [output_dir] [v11_clean|v11_balanced|legacy]
+```
+
+Refine outputs:
+
+- `refined_global_map_*.pcd`
+- `refined_map2d_*.pgm`
+- `refined_map2d_*.yaml`
+- `refined_trajectory_*.csv`
+- `refine_report_*.txt`
 
 Open viewer quickly:
 
@@ -479,6 +548,7 @@ cmake --build build -j
 
 - This stack is built around OFFBOARD velocity control.
 - In AUTO.MISSION, planners may keep publishing but PX4 mission logic remains primary.
+- Use `mission_obs_avoid` if you need mission-mode interception with deterministic OFFBOARD detour and resume guard.
 
 ## 13) Known Limitations
 
@@ -495,7 +565,9 @@ cmake --build build -j
 - Main orchestration scripts:
   - `scripts/start_sim_stack_terminator.sh`
   - `scripts/start_mapping_mode.sh`
-  - `scripts/start_slam_mapper.sh`
+  - `scripts/start_flight_mode.sh`
+  - `scripts/start_slam_mapper.sh` (deprecated wrapper to `start_mapping_mode.sh`)
+  - `mission_obs_avoid/scripts/start_mission_obs_avoid.sh`
 
 ---
 

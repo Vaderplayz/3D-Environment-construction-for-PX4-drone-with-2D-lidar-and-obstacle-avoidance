@@ -14,15 +14,17 @@ ROS_WS_DEFAULT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 ROS_WS="${ROS_WS:-${ROS_WS_DEFAULT}}"
 ROS_SETUP="${ROS_SETUP:-${ROS_WS}/install/setup.bash}"
 
+MAPPING_PROFILE="${MAPPING_PROFILE:-v11_full_detail}"
 SLAM_PARAMS_FILE="${SLAM_PARAMS_FILE:-${ROS_WS}/src/uav_stack_bringup/config/slam_mapping_fast.yaml}"
-MAPPER_PARAMS_FILE="${MAPPER_PARAMS_FILE:-${ROS_WS}/src/vertical_lidar_mapper/config/params.yaml}"
+MAPPER_PARAMS_FILE_DEFAULT_LEGACY="${ROS_WS}/src/vertical_lidar_mapper/config/params.yaml"
+MAPPER_PARAMS_FILE_DEFAULT_V11_CLEAN="${ROS_WS}/src/vertical_lidar_mapper/config/v11_clean.yaml"
+MAPPER_PARAMS_FILE_DEFAULT_V11_DETAIL="${ROS_WS}/src/vertical_lidar_mapper/config/v11_detail.yaml"
+MAPPER_PARAMS_FILE_DEFAULT_V11_FULL_DETAIL="${ROS_WS}/src/vertical_lidar_mapper/config/v11_full_detail.yaml"
+MAPPER_PARAMS_FILE="${MAPPER_PARAMS_FILE:-}"
+
 SCAN_TOPIC="${SCAN_TOPIC:-/scan_vertical}"
 TARGET_FRAME="${TARGET_FRAME:-map}"
 USE_SIM_TIME="${USE_SIM_TIME:-true}"
-ENABLE_SPIRAL="${ENABLE_SPIRAL:-true}"
-ENABLE_DODGE_PLANNER="${ENABLE_DODGE_PLANNER:-true}"
-PLANNER_NODE="${PLANNER_NODE:-local_planner_mode_a}"
-AUTO_SCAN_RELAY_FOR_SCAN_TOPIC="${AUTO_SCAN_RELAY_FOR_SCAN_TOPIC:-true}"
 
 WAIT_TIMEOUT_SEC="${WAIT_TIMEOUT_SEC:-60}"
 WAIT_TOPICS=(
@@ -38,37 +40,12 @@ WAIT_TF_SOURCE_NODES=(
 
 SLAM_LOG="${SLAM_LOG:-/tmp/slam_mapping_fast.log}"
 MAPPER_LOG="${MAPPER_LOG:-/tmp/vertical_lidar_mapper.log}"
-SPIRAL_LOG="${SPIRAL_LOG:-/tmp/spiral_mapping_mode.log}"
-PLANNER_LOG="${PLANNER_LOG:-/tmp/obs_avoid_planner.log}"
-SCAN_RELAY_LOG="${SCAN_RELAY_LOG:-/tmp/obs_avoid_scan_relay.log}"
 
 SLAM_PID=""
 MAPPER_PID=""
-SPIRAL_PID=""
-PLANNER_PID=""
-SCAN_RELAY_PID=""
-
-is_true() {
-  case "${1,,}" in
-    1|true|yes|on) return 0 ;;
-    *) return 1 ;;
-  esac
-}
 
 cleanup() {
   set +e
-  if [[ -n "${SCAN_RELAY_PID}" ]] && kill -0 "${SCAN_RELAY_PID}" >/dev/null 2>&1; then
-    echo "[stop] scan relay (pid=${SCAN_RELAY_PID})"
-    kill "${SCAN_RELAY_PID}" >/dev/null 2>&1 || true
-  fi
-  if [[ -n "${PLANNER_PID}" ]] && kill -0 "${PLANNER_PID}" >/dev/null 2>&1; then
-    echo "[stop] planner (pid=${PLANNER_PID})"
-    kill "${PLANNER_PID}" >/dev/null 2>&1 || true
-  fi
-  if [[ -n "${SPIRAL_PID}" ]] && kill -0 "${SPIRAL_PID}" >/dev/null 2>&1; then
-    echo "[stop] spiral_mapping_mode (pid=${SPIRAL_PID})"
-    kill "${SPIRAL_PID}" >/dev/null 2>&1 || true
-  fi
   if [[ -n "${MAPPER_PID}" ]] && kill -0 "${MAPPER_PID}" >/dev/null 2>&1; then
     echo "[stop] vertical_lidar_mapper (pid=${MAPPER_PID})"
     kill "${MAPPER_PID}" >/dev/null 2>&1 || true
@@ -131,11 +108,30 @@ wait_for_tf_source_node() {
 main() {
   require_cmd ros2
 
-  case "${PLANNER_NODE}" in
-    local_planner_mode_a|local_planner_sector_mode|local_planner_hybrid_mode) ;;
+  case "${MAPPING_PROFILE}" in
+    v11_clean)
+      if [[ -z "${MAPPER_PARAMS_FILE}" ]]; then
+        MAPPER_PARAMS_FILE="${MAPPER_PARAMS_FILE_DEFAULT_V11_CLEAN}"
+      fi
+      ;;
+    v11_detail)
+      if [[ -z "${MAPPER_PARAMS_FILE}" ]]; then
+        MAPPER_PARAMS_FILE="${MAPPER_PARAMS_FILE_DEFAULT_V11_DETAIL}"
+      fi
+      ;;
+    v11_full_detail)
+      if [[ -z "${MAPPER_PARAMS_FILE}" ]]; then
+        MAPPER_PARAMS_FILE="${MAPPER_PARAMS_FILE_DEFAULT_V11_FULL_DETAIL}"
+      fi
+      ;;
+    legacy)
+      if [[ -z "${MAPPER_PARAMS_FILE}" ]]; then
+        MAPPER_PARAMS_FILE="${MAPPER_PARAMS_FILE_DEFAULT_LEGACY}"
+      fi
+      ;;
     *)
-      echo "[error] invalid PLANNER_NODE='${PLANNER_NODE}'" >&2
-      echo "        allowed: local_planner_mode_a | local_planner_sector_mode | local_planner_hybrid_mode" >&2
+      echo "[error] invalid MAPPING_PROFILE='${MAPPING_PROFILE}'" >&2
+      echo "        allowed: v11_full_detail | v11_clean | v11_detail | legacy" >&2
       exit 1
       ;;
   esac
@@ -164,29 +160,6 @@ main() {
   wait_for_required_topics
   wait_for_tf_source_node
 
-  if is_true "${AUTO_SCAN_RELAY_FOR_SCAN_TOPIC}" && [[ "${PLANNER_NODE}" != "local_planner_mode_a" ]]; then
-    if ! ros2 topic list 2>/dev/null | grep -qx "/scan"; then
-      echo "[run] topic relay /scan_horizontal -> /scan -> ${SCAN_RELAY_LOG}"
-      ros2 run topic_tools relay /scan_horizontal /scan >"${SCAN_RELAY_LOG}" 2>&1 &
-      SCAN_RELAY_PID="$!"
-      sleep 1
-    fi
-  fi
-
-  if is_true "${ENABLE_DODGE_PLANNER}"; then
-    echo "[run] ${PLANNER_NODE} -> ${PLANNER_LOG}"
-    ros2 run obs_avoid "${PLANNER_NODE}" --ros-args -p use_sim_time:="${USE_SIM_TIME}" \
-      >"${PLANNER_LOG}" 2>&1 &
-    PLANNER_PID="$!"
-  fi
-
-  if is_true "${ENABLE_SPIRAL}"; then
-    echo "[run] spiral_mapping_mode -> ${SPIRAL_LOG}"
-    ros2 run obs_avoid spiral_mapping_mode --ros-args -p use_sim_time:="${USE_SIM_TIME}" \
-      >"${SPIRAL_LOG}" 2>&1 &
-    SPIRAL_PID="$!"
-  fi
-
   echo "[run] slam_toolbox -> ${SLAM_LOG}"
   ros2 launch slam_toolbox online_async_launch.py \
     slam_params_file:="${SLAM_PARAMS_FILE}" \
@@ -200,32 +173,20 @@ main() {
     params_file:="${MAPPER_PARAMS_FILE}" \
     scan_topic:="${SCAN_TOPIC}" \
     target_frame:="${TARGET_FRAME}" \
+    enable_odom_tf_bridge:=false \
     use_sim_time:="${USE_SIM_TIME}" >"${MAPPER_LOG}" 2>&1 &
   MAPPER_PID="$!"
 
-  echo "[ok] mapping mode started"
-  if [[ -n "${SPIRAL_PID}" ]]; then
-    echo "[info] spiral pid=${SPIRAL_PID}"
-    echo "[info] tail -f ${SPIRAL_LOG}"
-  fi
-  if [[ -n "${PLANNER_PID}" ]]; then
-    echo "[info] planner pid=${PLANNER_PID} (${PLANNER_NODE})"
-    echo "[info] tail -f ${PLANNER_LOG}"
-  fi
-  if [[ -n "${SCAN_RELAY_PID}" ]]; then
-    echo "[info] scan relay pid=${SCAN_RELAY_PID}"
-    echo "[info] tail -f ${SCAN_RELAY_LOG}"
-  fi
+  echo "[ok] mapping-only mode started"
+  echo "[info] mapping profile=${MAPPING_PROFILE}"
+  echo "[info] mapper params=${MAPPER_PARAMS_FILE}"
+  echo "[info] slam params=${SLAM_PARAMS_FILE}"
+  echo "[info] no flight-control node is launched by this script"
   echo "[info] slam pid=${SLAM_PID}, mapper pid=${MAPPER_PID}"
   echo "[info] tail -f ${SLAM_LOG}"
   echo "[info] tail -f ${MAPPER_LOG}"
 
-  local pids=("${SLAM_PID}" "${MAPPER_PID}")
-  if [[ -n "${SPIRAL_PID}" ]]; then pids+=("${SPIRAL_PID}"); fi
-  if [[ -n "${PLANNER_PID}" ]]; then pids+=("${PLANNER_PID}"); fi
-  if [[ -n "${SCAN_RELAY_PID}" ]]; then pids+=("${SCAN_RELAY_PID}"); fi
-
-  wait -n "${pids[@]}"
+  wait -n "${SLAM_PID}" "${MAPPER_PID}"
   exit_code=$?
   echo "[warn] one process exited (code=${exit_code}), stopping the other."
   exit "${exit_code}"

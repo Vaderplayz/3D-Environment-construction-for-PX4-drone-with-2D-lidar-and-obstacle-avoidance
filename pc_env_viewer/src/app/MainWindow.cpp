@@ -75,6 +75,9 @@ MainWindow::MainWindow(const CliOptions & cli_options, QWidget * parent)
   file_menu->addAction("Quit", this, &QWidget::close);
 
   auto * view_menu = menuBar()->addMenu("&View");
+  show_trajectory_3d_action_ = view_menu->addAction("Show 3D Trajectory");
+  show_trajectory_3d_action_->setCheckable(true);
+  show_trajectory_3d_action_->setChecked(false);
   reset_camera_action_ = view_menu->addAction("Reset Camera");
   auto_fit_action_ = view_menu->addAction("Auto Fit");
   auto_fit_action_->setShortcut(QKeySequence(Qt::Key_F));
@@ -163,8 +166,11 @@ MainWindow::MainWindow(const CliOptions & cli_options, QWidget * parent)
   connect(color_mode_combo_, qOverload<int>(&QComboBox::currentIndexChanged), this, &MainWindow::onColorModeChanged);
   connect(rainbow_axis_combo_, qOverload<int>(&QComboBox::currentIndexChanged), this, &MainWindow::onRainbowAxisChanged);
   connect(point_size_spin_, qOverload<double>(&QDoubleSpinBox::valueChanged), this, &MainWindow::onPointSizeChanged);
+  connect(show_trajectory_3d_action_, &QAction::toggled, this, &MainWindow::onShowTrajectory3DToggled);
   connect(&load_watcher_, &QFutureWatcher<PipelineResult>::finished, this, &MainWindow::onLoadWatcherFinished);
   connect(this, &MainWindow::loadProgress, this, &MainWindow::onLoadProgressMessage);
+
+  viewer_widget_->setTrajectoryVisible(false);
 
   loadRecentFiles();
   rebuildRecentFileMenu();
@@ -380,6 +386,12 @@ void MainWindow::onRainbowAxisChanged(int index)
 void MainWindow::onPointSizeChanged(double value)
 {
   viewer_widget_->setPointSize(static_cast<float>(value));
+}
+
+void MainWindow::onShowTrajectory3DToggled(bool enabled)
+{
+  viewer_widget_->setTrajectoryVisible(enabled);
+  statusBar()->showMessage(enabled ? "3D trajectory enabled" : "3D trajectory hidden", 2000);
 }
 
 void MainWindow::onLoadWatcherFinished()
@@ -602,12 +614,22 @@ void MainWindow::tryLoadAssociatedMapAssets(const QString & cloud_path)
   const QString nsec = match.captured(2);
   const QDir dir(cloud_info.absolutePath());
 
+  const QString slam_yaml_candidate = dir.filePath(QString("slam2d_map_%1_%2.yaml").arg(sec, nsec));
+  const QString slam_pgm_candidate = dir.filePath(QString("slam2d_map_%1_%2.pgm").arg(sec, nsec));
   const QString yaml_candidate = dir.filePath(QString("vertical_map2d_%1_%2.yaml").arg(sec, nsec));
   const QString pgm_candidate = dir.filePath(QString("vertical_map2d_%1_%2.pgm").arg(sec, nsec));
   const QString trajectory_candidate = dir.filePath(QString("vertical_trajectory_%1_%2.csv").arg(sec, nsec));
 
   QString err;
-  if (QFileInfo::exists(yaml_candidate)) {
+  if (QFileInfo::exists(slam_yaml_candidate)) {
+    if (!load2DMapAsset(slam_yaml_candidate, &err)) {
+      statusBar()->showMessage("Associated SLAM 2D map load failed: " + err, 5000);
+    }
+  } else if (QFileInfo::exists(slam_pgm_candidate)) {
+    if (!load2DMapAsset(slam_pgm_candidate, &err)) {
+      statusBar()->showMessage("Associated SLAM 2D map load failed: " + err, 5000);
+    }
+  } else if (QFileInfo::exists(yaml_candidate)) {
     if (!load2DMapAsset(yaml_candidate, &err)) {
       statusBar()->showMessage("Associated 2D map load failed: " + err, 5000);
     }

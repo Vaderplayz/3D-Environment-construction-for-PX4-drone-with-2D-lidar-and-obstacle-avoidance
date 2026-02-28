@@ -50,6 +50,11 @@ void ViewerWidget::clearTrajectory()
   renderer_.clearTrajectory();
 }
 
+void ViewerWidget::setTrajectoryVisible(bool visible)
+{
+  renderer_.setTrajectoryVisible(visible);
+}
+
 void ViewerWidget::setPointSize(float point_size)
 {
   renderer_.setPointSize(point_size);

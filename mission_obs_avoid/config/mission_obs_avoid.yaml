@@ -1,0 +1,57 @@
+mission_interceptor:
+  ros__parameters:
+    use_sim_time: true
+
+    state_topic: "/mavros/state"
+    scan_topic: "/scan_horizontal"
+    odom_topic: "/mavros/local_position/odom"
+
+    cmd_topic: "/mission_interceptor/cmd_vel"
+    override_topic: "/mission_interceptor/override_active"
+    state_out_topic: "/mission_obs_avoid/state"
+    status_topic: "/mission_obs_avoid/status"
+    cmd_frame_id: "map"
+
+    hazard_distance: 2.5
+    emergency_distance: 1.0
+    clear_distance: 3.0
+    front_fov_deg: 40.0
+
+    hazard_confirm_sec: 0.30
+    offboard_warmup_sec: 1.00
+    setpoint_hz: 20.0
+
+    set_mode_retry_sec: 1.0
+    max_set_mode_retries: 5
+
+    brake_sec: 0.8
+    sidestep_speed: 0.6
+    sidestep_min_dist: 1.5
+    sidestep_max_sec: 4.0
+    forward_speed: 0.8
+    forward_clear_dist: 2.0
+
+    clear_hold_sec: 1.5
+    max_intercept_sec: 15.0
+    resume_grace_sec: 2.5
+    cooldown_sec: 5.0
+    latch_clear_hold_sec: 3.0
+    sensor_timeout_sec: 0.6
+
+    side_clear_percentile: 0.50
+    side_clear_tie_margin: 0.10
+
+cmd_vel_arbiter:
+  ros__parameters:
+    use_sim_time: true
+
+    offboard_cmd_topic: "/offboard_stack/cmd_vel"
+    interceptor_cmd_topic: "/mission_interceptor/cmd_vel"
+    override_topic: "/mission_interceptor/override_active"
+    output_topic: "/mavros/setpoint_velocity/cmd_vel"
+
+    arbiter_rate_hz: 30.0
+    offboard_cmd_timeout_sec: 0.50
+    interceptor_cmd_timeout_sec: 0.25
+    publish_zero_on_stale: true
+    cmd_frame_id: "map"

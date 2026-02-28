@@ -208,6 +208,12 @@ void CloudRenderer::clearTrajectory()
   redrawTrajectory();
 }
 
+void CloudRenderer::setTrajectoryVisible(bool visible)
+{
+  trajectory_visible_ = visible;
+  redrawTrajectory();
+}
+
 void CloudRenderer::setPointSize(float point_size)
 {
   if (!isInitialized()) {
@@ -405,6 +411,13 @@ void CloudRenderer::redrawTrajectory()
     viewer_->removeShape(trajectory_line_prefix_ + std::to_string(i));
   }
   trajectory_line_count_ = 0;
+
+  if (!trajectory_visible_) {
+    if (viewer_->getRenderWindow()) {
+      viewer_->getRenderWindow()->Render();
+    }
+    return;
+  }
 
   if (trajectory_points_.size() < 2U) {
     if (viewer_->getRenderWindow()) {

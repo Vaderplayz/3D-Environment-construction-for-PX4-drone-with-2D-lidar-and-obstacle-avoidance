@@ -35,6 +35,10 @@ add_executable(spiral_mapping_mode src/spiral_mapping_mode.cpp)
 ament_target_dependencies(spiral_mapping_mode rclcpp mavros_msgs geometry_msgs)
 install(TARGETS spiral_mapping_mode DESTINATION lib/${PROJECT_NAME})
 
+add_executable(lawnmower_mapping_mode src/lawnmower_mapping_mode.cpp)
+ament_target_dependencies(lawnmower_mapping_mode rclcpp mavros_msgs geometry_msgs)
+install(TARGETS lawnmower_mapping_mode DESTINATION lib/${PROJECT_NAME})
+
 
 add_executable(local_planner_mode_a src/local_planner_mode_a.cpp)
 ament_target_dependencies(local_planner_mode_a rclcpp mavros_msgs geometry_msgs sensor_msgs nav_msgs tf2)

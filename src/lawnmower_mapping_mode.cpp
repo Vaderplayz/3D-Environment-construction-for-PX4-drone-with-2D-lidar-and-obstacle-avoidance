@@ -75,9 +75,9 @@ double yaw_from_pose(const geometry_msgs::msg::PoseStamped &pose) {
 }
 }  // namespace
 
-class SpiralMappingMode : public rclcpp::Node {
+class LawnmowerMappingMode : public rclcpp::Node {
  public:
-  SpiralMappingMode() : Node("spiral_mapping_mode") {
+  LawnmowerMappingMode() : Node("lawnmower_mapping_mode") {
     // Offboard / timing
     setpoint_hz_ = declare_parameter<double>("setpoint_hz", 20.0);
     warmup_sec_ = declare_parameter<double>("warmup_sec", 2.0);
@@ -141,8 +141,8 @@ class SpiralMappingMode : public rclcpp::Node {
     waypoint_no_progress_obstacle_gate_ =
         declare_parameter<double>("waypoint_no_progress_obstacle_gate", 1.60);
 
-    // Spiral mission generation
-    mission_pattern_ = declare_parameter<std::string>("mission_pattern", "spiral");
+    // Mapping mission generation
+    mission_pattern_ = declare_parameter<std::string>("mission_pattern", "lawnmower");
     ask_mission_on_start_ = declare_parameter<bool>("ask_mission_on_start", true);
     input_poll_hz_ = declare_parameter<double>("input_poll_hz", 10.0);
     print_input_help_on_start_ = declare_parameter<bool>("print_input_help_on_start", true);
@@ -170,16 +170,16 @@ class SpiralMappingMode : public rclcpp::Node {
 
     pose_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
         "/mavros/local_position/pose", qos_pose,
-        std::bind(&SpiralMappingMode::pose_cb, this, std::placeholders::_1));
+        std::bind(&LawnmowerMappingMode::pose_cb, this, std::placeholders::_1));
     scan_sub_ = create_subscription<sensor_msgs::msg::LaserScan>(
         waypoint_skip_scan_topic_, qos_scan,
         [this](sensor_msgs::msg::LaserScan::SharedPtr msg) { scan_ = *msg; });
     planner_cmd_sub_ = create_subscription<geometry_msgs::msg::TwistStamped>(
         "/planner_cmd_vel", qos_cmd,
-        std::bind(&SpiralMappingMode::planner_cmd_cb, this, std::placeholders::_1));
+        std::bind(&LawnmowerMappingMode::planner_cmd_cb, this, std::placeholders::_1));
     dwa_state_sub_ = create_subscription<std_msgs::msg::String>(
         "/dwa/state", qos_cmd,
-        std::bind(&SpiralMappingMode::dwa_state_cb, this, std::placeholders::_1));
+        std::bind(&LawnmowerMappingMode::dwa_state_cb, this, std::placeholders::_1));
 
     arming_client_ = create_client<mavros_msgs::srv::CommandBool>("/mavros/cmd/arming");
     set_mode_client_ = create_client<mavros_msgs::srv::SetMode>("/mavros/set_mode");
@@ -187,18 +187,18 @@ class SpiralMappingMode : public rclcpp::Node {
     const auto sp_period = std::chrono::duration<double>(1.0 / std::max(1.0, setpoint_hz_));
     setpoint_timer_ = create_wall_timer(
         std::chrono::duration_cast<std::chrono::milliseconds>(sp_period),
-        std::bind(&SpiralMappingMode::publish_setpoint_cmd, this));
+        std::bind(&LawnmowerMappingMode::publish_setpoint_cmd, this));
 
     const auto state_period = std::chrono::duration<double>(1.0 / std::max(0.2, state_check_hz_));
     state_timer_ = create_wall_timer(
         std::chrono::duration_cast<std::chrono::milliseconds>(state_period),
-        std::bind(&SpiralMappingMode::state_machine, this));
+        std::bind(&LawnmowerMappingMode::state_machine, this));
 
     if (ask_mission_on_start_) {
       const auto input_period = std::chrono::duration<double>(1.0 / std::max(1.0, input_poll_hz_));
       input_timer_ = create_wall_timer(
           std::chrono::duration_cast<std::chrono::milliseconds>(input_period),
-          std::bind(&SpiralMappingMode::poll_mission_input, this));
+          std::bind(&LawnmowerMappingMode::poll_mission_input, this));
       input_active_ = true;
     }
 
@@ -206,7 +206,7 @@ class SpiralMappingMode : public rclcpp::Node {
     next_arm_request_time_ = now();
 
     RCLCPP_INFO(get_logger(),
-                "SpiralMappingMode started. setpoint_hz=%.1f warmup_sec=%.1f retry_sec=%.1f",
+                "LawnmowerMappingMode started. setpoint_hz=%.1f warmup_sec=%.1f retry_sec=%.1f",
                 setpoint_hz_, warmup_sec_, request_retry_sec_);
 
     if (ask_mission_on_start_) {
@@ -787,7 +787,7 @@ class SpiralMappingMode : public rclcpp::Node {
   }
 
   void print_input_help() {
-    std::cout << "\nSpiral mission input:\n"
+    std::cout << "\nMapping mission input:\n"
               << "  <side_m> [z_layers] [z_step_m] [center_z]\n"
               << "Examples:\n"
               << "  30\n"
@@ -873,6 +873,9 @@ class SpiralMappingMode : public rclcpp::Node {
     const double half = 0.5 * side;
     const double pitch = std::max(0.5, spiral_pitch_ratio_ * lidar_range_m_);
     const std::string mission_pattern = lower_copy(trim_copy(mission_pattern_));
+    const bool use_lawnmower =
+        (mission_pattern == "lawnmower") || (mission_pattern == "boustrophedon") ||
+        (mission_pattern == "coverage");
     const bool deterministic_loops = (mission_pattern == "deterministic_loops");
 
     std::vector<geometry_msgs::msg::Point> wps;
@@ -882,7 +885,39 @@ class SpiralMappingMode : public rclcpp::Node {
       const double z = z_center + static_cast<double>(layer) * z_step;
       add_waypoint(wps, wps.back().x, wps.back().y, z);
 
-      if (deterministic_loops) {
+      if (use_lawnmower) {
+        // Boustrophedon sweep across the square ROI for uniform area coverage.
+        const double lane_step = std::max(0.8, pitch);
+        const int lane_count =
+            std::max(2, static_cast<int>(std::ceil(side / std::max(1e-3, lane_step))) + 1);
+        const double x_min = center_.x - half;
+        const double x_max = center_.x + half;
+        const double y_min = center_.y - half;
+        const double y_max = center_.y + half;
+
+        for (int lane = 0; lane < lane_count; ++lane) {
+          const double y = std::min(y_max, y_min + static_cast<double>(lane) * lane_step);
+          if ((lane % 2) == 0) {
+            add_waypoint(wps, x_min, y, z);
+            add_waypoint(wps, x_max, y, z);
+          } else {
+            add_waypoint(wps, x_max, y, z);
+            add_waypoint(wps, x_min, y, z);
+          }
+        }
+
+        const double y_last =
+            std::min(y_max, y_min + static_cast<double>(lane_count - 1) * lane_step);
+        if (y_max - y_last > 0.25 * lane_step) {
+          if ((lane_count % 2) == 0) {
+            add_waypoint(wps, x_min, y_max, z);
+            add_waypoint(wps, x_max, y_max, z);
+          } else {
+            add_waypoint(wps, x_max, y_max, z);
+            add_waypoint(wps, x_min, y_max, z);
+          }
+        }
+      } else if (deterministic_loops) {
         const double loop_step = std::max(1.0, pitch);
         const int loop_count =
             std::max(1, static_cast<int>(std::ceil(half / std::max(1e-3, loop_step))));
@@ -925,10 +960,12 @@ class SpiralMappingMode : public rclcpp::Node {
     current_wp_idx_ = (waypoints_.size() > 1) ? 1u : 0u;
     mission_active_ = !waypoints_.empty();
 
+    const char *pattern_name =
+        use_lawnmower ? "lawnmower" : (deterministic_loops ? "deterministic_loops" : "spiral");
     RCLCPP_INFO(get_logger(),
                 "[MISSION] configured: pattern=%s side=%.2f pitch=%.2f layers=%d waypoints=%zu center=(%.2f %.2f %.2f)",
-                deterministic_loops ? "deterministic_loops" : "spiral", side, pitch, layers,
-                waypoints_.size(), center_.x, center_.y, center_.z);
+                pattern_name, side, pitch, layers, waypoints_.size(), center_.x, center_.y,
+                center_.z);
     if (mission_active_) publish_goal_waypoint(current_wp_idx_);
   }
 
@@ -1037,7 +1074,7 @@ class SpiralMappingMode : public rclcpp::Node {
   double waypoint_no_progress_delta_m_{0.10};
   double waypoint_no_progress_obstacle_gate_{1.60};
 
-  std::string mission_pattern_{"spiral"};
+  std::string mission_pattern_{"lawnmower"};
   bool ask_mission_on_start_{true};
   double input_poll_hz_{10.0};
   bool print_input_help_on_start_{true};
@@ -1114,7 +1151,7 @@ class SpiralMappingMode : public rclcpp::Node {
 
 int main(int argc, char **argv) {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<SpiralMappingMode>());
+  rclcpp::spin(std::make_shared<LawnmowerMappingMode>());
   rclcpp::shutdown();
   return 0;
 }
