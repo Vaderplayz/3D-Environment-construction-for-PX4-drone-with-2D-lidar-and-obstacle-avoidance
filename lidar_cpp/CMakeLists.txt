@@ -23,14 +23,14 @@ find_package(tf2_geometry_msgs REQUIRED) # Needed for math headers
 add_executable(tilt_broadcaster src/tilt_broadcaster.cpp)
 
 # 3. Handle include paths and linking
-# We use this macro INSTEAD of target_link_libraries to fix the "not found" error
-ament_target_dependencies(tilt_broadcaster
-  rclcpp
-  sensor_msgs
-  tf2_ros
-  geometry_msgs
-  tf2
-  tf2_geometry_msgs
+target_link_libraries(tilt_broadcaster PUBLIC
+  rclcpp::rclcpp
+  ${sensor_msgs_TARGETS}
+  sensor_msgs::sensor_msgs_library
+  ${tf2_ros_TARGETS}
+  ${geometry_msgs_TARGETS}
+  tf2::tf2
+  ${tf2_geometry_msgs_TARGETS}
 )
 
 # 4. Install the executable so 'ros2 run' can find it

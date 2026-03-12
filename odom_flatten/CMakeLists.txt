@@ -16,12 +16,12 @@ add_executable(px4_odom_flatten_node
   src/px4_odom_flatten_node.cpp
 )
 
-ament_target_dependencies(px4_odom_flatten_node
-  rclcpp
-  nav_msgs
-  tf2
-  tf2_ros
-  tf2_geometry_msgs
+target_link_libraries(px4_odom_flatten_node PUBLIC
+  rclcpp::rclcpp
+  ${nav_msgs_TARGETS}
+  tf2::tf2
+  ${tf2_ros_TARGETS}
+  ${tf2_geometry_msgs_TARGETS}
 )
 
 install(TARGETS px4_odom_flatten_node

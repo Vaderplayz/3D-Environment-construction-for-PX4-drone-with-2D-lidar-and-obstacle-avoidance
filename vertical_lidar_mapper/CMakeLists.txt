@@ -33,38 +33,41 @@ include_directories(
 add_executable(vertical_lidar_mapper_node
   src/vertical_lidar_mapper.cpp
 )
-ament_target_dependencies(vertical_lidar_mapper_node
-  rclcpp
-  std_srvs
-  diagnostic_msgs
-  message_filters
-  sensor_msgs
-  nav_msgs
-  geometry_msgs
-  tf2
-  tf2_ros
-  tf2_sensor_msgs
-  laser_geometry
-  pcl_conversions
+target_link_libraries(vertical_lidar_mapper_node PUBLIC
+  rclcpp::rclcpp
+  ${std_srvs_TARGETS}
+  ${diagnostic_msgs_TARGETS}
+  ${message_filters_TARGETS}
+  message_filters::message_filters
+  ${sensor_msgs_TARGETS}
+  sensor_msgs::sensor_msgs_library
+  ${nav_msgs_TARGETS}
+  ${geometry_msgs_TARGETS}
+  tf2::tf2
+  ${tf2_ros_TARGETS}
+  ${tf2_sensor_msgs_TARGETS}
+  ${laser_geometry_TARGETS}
+  ${pcl_conversions_TARGETS}
 )
-target_link_libraries(vertical_lidar_mapper_node ${PCL_LIBRARIES})
+target_link_libraries(vertical_lidar_mapper_node PUBLIC ${PCL_LIBRARIES})
 
 add_executable(odom_to_tf_bridge_node
   src/odom_to_tf_bridge.cpp
 )
-ament_target_dependencies(odom_to_tf_bridge_node
-  rclcpp
-  nav_msgs
-  geometry_msgs
-  tf2_ros
+target_link_libraries(odom_to_tf_bridge_node PUBLIC
+  rclcpp::rclcpp
+  ${nav_msgs_TARGETS}
+  ${geometry_msgs_TARGETS}
+  ${tf2_ros_TARGETS}
 )
 
 add_executable(scan_frame_override_node
   src/scan_frame_override.cpp
 )
-ament_target_dependencies(scan_frame_override_node
-  rclcpp
-  sensor_msgs
+target_link_libraries(scan_frame_override_node PUBLIC
+  rclcpp::rclcpp
+  ${sensor_msgs_TARGETS}
+  sensor_msgs::sensor_msgs_library
 )
 
 install(TARGETS
